@@ -61,10 +61,10 @@ class SRTParser:
         return '\n'.join(result)
 
 class APITranslator:
-    def __init__(self, api_url: str, model: str, api_key: str):
+    def __init__(self, api_url: str, model: str, api_key: str = ""):
         self.api_url = api_url
         self.model = model
-        self.api_key = api_key
+        self.api_key = api_key.strip() if api_key else ""
         self.session = requests.Session()
         
     def translate_text(self, text: str, context: str = "") -> str:
@@ -103,9 +103,12 @@ class APITranslator:
     
     def _translate_openai(self, prompt: str) -> str:
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
+        
+        # 只有当API key存在时才添加认证头
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         
         data = {
             "model": self.model,
@@ -129,10 +132,13 @@ class APITranslator:
     
     def _translate_anthropic(self, prompt: str) -> str:
         headers = {
-            "x-api-key": self.api_key,
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01"
         }
+        
+        # 只有当API key存在时才添加认证头
+        if self.api_key:
+            headers["x-api-key"] = self.api_key
         
         data = {
             "model": self.model,
@@ -160,9 +166,12 @@ class APITranslator:
     
     def _translate_generic(self, prompt: str) -> str:
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
+        
+        # 只有当API key存在时才添加认证头
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         
         data = {
             "model": self.model,
@@ -471,8 +480,9 @@ class SRTTranslatorGUI:
             messagebox.showerror("錯誤", "請先選擇SRT檔案")
             return
         
-        if not all([self.api_url_var.get(), self.model_var.get(), self.api_key_var.get()]):
-            messagebox.showerror("錯誤", "請先配置API設定")
+        # 检查必要的配置（API key对于本地服务如ollama是可选的）
+        if not self.api_url_var.get().strip() or not self.model_var.get().strip():
+            messagebox.showerror("錯誤", "請先配置API網址和模型")
             return
         
         # 在新線程中執行批次翻譯
