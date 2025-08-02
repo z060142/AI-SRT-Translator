@@ -1,0 +1,30 @@
+# Build tools and compiled files
+build_tools/
+*.exe
+build/
+dist/
+*.spec
+
+# Configuration files
+srt_translator_config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+srt_translator_env/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
