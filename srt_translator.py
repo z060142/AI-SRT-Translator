@@ -3,16 +3,14 @@
 
 import re
 import os
-import sys
 import json
 import time
 import requests
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkinterdnd2 import DND_FILES, TkinterDnD
-from datetime import datetime, timedelta
 import threading
-from typing import List, Dict, Tuple, Optional
+from typing import List
 
 class SRTEntry:
     def __init__(self, index: int, start_time: str, end_time: str, text: str):
@@ -53,10 +51,47 @@ class SRTParser:
         return entries
     
     @staticmethod
-    def entries_to_srt(entries: List[SRTEntry]) -> str:
+    def auto_wrap_text(text: str, max_chars: int = 25, wrap_point: int = 20) -> str:
+        """自動分行功能：如果單行超過max_chars個字符，在wrap_point處分行"""
+        if not text or len(text) <= max_chars:
+            return text
+        
+        lines = []
+        current_line = text
+        
+        while len(current_line) > max_chars:
+            # 找到分行點（在wrap_point附近尋找合適的分割位置）
+            split_point = wrap_point
+            
+            # 嘗試在標點符號或空格處分行
+            for i in range(wrap_point - 5, wrap_point + 5):
+                if i < len(current_line) and current_line[i] in '，。、；：！？ ,.:;!?':
+                    split_point = i + 1
+                    break
+            
+            # 如果沒找到合適的標點，就在wrap_point處分行
+            if split_point >= len(current_line):
+                split_point = wrap_point
+            
+            lines.append(current_line[:split_point].strip())
+            current_line = current_line[split_point:].strip()
+        
+        # 添加最後一行
+        if current_line:
+            lines.append(current_line)
+        
+        return '\n'.join(lines)
+    
+    @staticmethod
+    def entries_to_srt(entries: List[SRTEntry], auto_wrap: bool = False) -> str:
         result = []
         for entry in entries:
             text = entry.translated_text if entry.translated_text else entry.text
+            
+            # 如果啟用自動分行，對文本進行處理
+            if auto_wrap and text:
+                text = SRTParser.auto_wrap_text(text)
+            
             result.append(f"{entry.index}\n{entry.start_time} --> {entry.end_time}\n{text}\n")
         return '\n'.join(result)
 
@@ -385,6 +420,13 @@ class SRTTranslatorGUI:
         ttk.Entry(batch_words_frame, textvariable=self.batch_words_var, width=10).pack(side="left")
         ttk.Label(batch_words_frame, text="字 (建議: 50-200)").pack(side="left", padx=(5, 0))
         
+        # 自動分行設定
+        ttk.Label(config_frame, text="自動分行:").grid(row=4, column=0, sticky="w", pady=2)
+        self.auto_wrap_var = tk.BooleanVar(value=True)
+        auto_wrap_frame = ttk.Frame(config_frame)
+        auto_wrap_frame.grid(row=4, column=1, sticky="ew", pady=2)
+        ttk.Checkbutton(auto_wrap_frame, text="超過25字時在第20字處自動分行", variable=self.auto_wrap_var).pack(side="left")
+        
         config_frame.columnconfigure(1, weight=1)
         
         # 按鈕框架
@@ -458,6 +500,7 @@ class SRTTranslatorGUI:
                     self.model_var.set(config.get('model', ''))
                     self.api_key_var.set(config.get('api_key', ''))
                     self.batch_words_var.set(config.get('batch_words', '100'))
+                    self.auto_wrap_var.set(config.get('auto_wrap', True))
             except Exception as e:
                 print(f"載入配置失敗: {e}")
     
@@ -466,7 +509,8 @@ class SRTTranslatorGUI:
             'api_url': self.api_url_var.get(),
             'model': self.model_var.get(),
             'api_key': self.api_key_var.get(),
-            'batch_words': self.batch_words_var.get()
+            'batch_words': self.batch_words_var.get(),
+            'auto_wrap': self.auto_wrap_var.get()
         }
         
         try:
@@ -708,7 +752,7 @@ class SRTTranslatorGUI:
             base_name = os.path.splitext(file_info['path'])[0]
             output_path = f"{base_name}.zh.srt"
             with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(SRTParser.entries_to_srt(file_info['entries']))
+                f.write(SRTParser.entries_to_srt(file_info['entries'], auto_wrap=self.auto_wrap_var.get()))
         except Exception as e:
             print(f"保存重試結果失敗: {e}")
         
@@ -799,20 +843,6 @@ class SRTTranslatorGUI:
         else:
             messagebox.showerror("錯誤", "請選擇SRT檔案")
     
-    def load_srt_file(self, file_path):
-        """Legacy method for single file loading"""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            self.entries = SRTParser.parse_srt(content)
-            self.file_path = file_path
-            
-            self.drag_label.config(text=f"已載入: {os.path.basename(file_path)}\n共 {len(self.entries)} 個字幕條目")
-            self.progress_var.set(f"已載入 {len(self.entries)} 個字幕條目，準備翻譯")
-            
-        except Exception as e:
-            messagebox.showerror("錯誤", f"載入SRT檔案失敗: {e}")
     
     def start_translation(self):
         if not self.batch_files:
@@ -967,85 +997,13 @@ class SRTTranslatorGUI:
         
         try:
             with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(SRTParser.entries_to_srt(entries))
+                f.write(SRTParser.entries_to_srt(entries, auto_wrap=self.auto_wrap_var.get()))
             print(f"檔案 {filename} 翻譯完成，輸出至: {output_path}")
         except Exception as e:
             print(f"保存檔案 {filename} 時發生錯誤: {e}")
         
         return file_stats
     
-    def translate_worker(self):
-        """Legacy method for single file translation"""
-        try:
-            self.translator = APITranslator(
-                self.api_url_var.get(),
-                self.model_var.get(),
-                self.api_key_var.get()
-            )
-            
-            batch_translator = BatchTranslator(self.translator)
-            # 獲取批次字數設定
-            try:
-                max_words = int(self.batch_words_var.get())
-                if max_words < 10:
-                    max_words = 10
-                elif max_words > 500:
-                    max_words = 500
-            except ValueError:
-                max_words = 100
-            
-            batches = batch_translator.create_batches(self.entries, max_words=max_words)
-            
-            self.progress_bar.config(maximum=len(batches))
-            
-            entry_idx = 0
-            for batch_idx, batch in enumerate(batches):
-                self.progress_var.set(f"翻譯中... ({batch_idx + 1}/{len(batches)})")
-                
-                context = batch_translator.get_context(self.entries, entry_idx)
-                translations = batch_translator.translate_batch(batch, context)
-                
-                for entry, translation in zip(batch, translations):
-                    entry.translated_text = translation
-                    entry_idx += 1
-                
-                self.progress_bar['value'] = batch_idx + 1
-                self.root.update_idletasks()
-                time.sleep(1)
-            
-            untranslated_count = 0
-            failed_entries = []
-            
-            for entry in self.entries:
-                if not entry.translated_text or entry.translated_text.strip() == "":
-                    untranslated_count += 1
-                    failed_entries.append(entry.index)
-                elif entry.translated_text.startswith("[翻譯失敗]"):
-                    untranslated_count += 1
-                    failed_entries.append(entry.index)
-            
-            base_name = os.path.splitext(self.file_path)[0]
-            output_path = f"{base_name}.zh.srt"
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(SRTParser.entries_to_srt(self.entries))
-            
-            total_entries = len(self.entries)
-            success_count = total_entries - untranslated_count
-            
-            result_msg = f"翻譯完成！\n"
-            result_msg += f"總條目: {total_entries}\n"
-            result_msg += f"成功翻譯: {success_count}\n"
-            if untranslated_count > 0:
-                result_msg += f"未翻譯/失敗: {untranslated_count}\n"
-                result_msg += f"失敗條目: {failed_entries[:10]}{'...' if len(failed_entries) > 10 else ''}\n"
-            result_msg += f"輸出檔案: {output_path}"
-            
-            self.progress_var.set(f"翻譯完成！成功 {success_count}/{total_entries}")
-            messagebox.showinfo("完成", result_msg)
-            
-        except Exception as e:
-            self.progress_var.set("翻譯失敗")
-            messagebox.showerror("錯誤", f"翻譯失敗: {e}")
     
     def run(self):
         self.root.mainloop()
